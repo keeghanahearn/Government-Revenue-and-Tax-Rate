@@ -1,0 +1,186 @@
+#==============================================================================
+#  Relationship Between Government Tax Revenue and Income Tax
+#==============================================================================
+# Keeghan Ahearn
+# 1st Version 10/28/2024.
+
+#==============================================================================
+#   1. Packages
+#==============================================================================
+# Clear the working space
+rm(list = ls())
+
+# Set working directory
+
+setwd("C:/Users/Keeghan/Desktop/Tax Data/")
+
+
+library(stargazer)
+library(sandwich)
+library(car)
+library(doBy)
+library(AER)
+library(gdata)
+library(tidyverse)
+library(dplyr)
+library(data.table)
+library(tidyr)
+library(readxl)
+library(stringr)
+library(ggplot2)
+
+
+# turn off scientific notation except for big numbers
+options(scipen = 9)
+
+# function to calculate robust standard errors for regression
+cse <- function(reg) {
+  rob = sqrt(diag(vcovHC(reg, type = "HC1")))
+  return(rob)
+}
+
+#==============================================================================
+#   2. Data Loading and Wrangling
+#==============================================================================
+
+#Government Revenue as a share of GDP
+Gov_Rev_GDP <- read_xlsx('51134-2024-02-Historical-Budget-Data.xlsx', 
+                           sheet = 3,
+                           skip = 8,
+                           col_names = TRUE)
+
+#Income Tax Rate
+Tax_Rate <- fread('Historical Income Tax Rates and Brackets, 1862-2021 numeric.csv', header=T, sep=',')
+
+#Income Tax Revenue as a share of GDP
+Inc_Rev_GDP <- read_xlsx('51134-2024-02-Historical-Budget-Data.xlsx', 
+                         sheet = 5,
+                         skip = 7,
+                         col_names = TRUE)
+
+
+##Gov_Rev_GDP Wrangling
+#Remove unneeded columns from Gov_Rev_GDP
+Gov_Rev_GDP <- Gov_Rev_GDP %>% select(-(Outlays:8)) 
+
+#Remove unneeded rows from Gov_Rev_GDP
+Gov_Rev_GDP <- Gov_Rev_GDP[-c(63:69), ]
+
+#Rename Year column
+Gov_Rev_GDP <- Gov_Rev_GDP %>% 
+  rename(
+    Year = 1)
+
+
+##Tax_Rate Wrangling
+#Remove unneeded columns from Tax_Rate
+Tax_Rate <- Tax_Rate %>% select(-2:-7, -9, -11:-14)
+
+#Remove blank/NA rows in Tax_Rate
+Tax_Rate[!apply(Tax_Rate == "", 1, all),]
+Tax_Rate <- Tax_Rate[!apply(is.na(Tax_Rate) | Tax_Rate == "", 1, all),]
+
+##Inc_Rev_GDP Wrangling
+#Remove unneeded columns from Inc_Rev_GDP
+Inc_Rev_GDP <- Inc_Rev_GDP %>% select(-('Payroll taxes':'Total'))
+
+#Remove unneeded Rows
+Inc_Rev_GDP <- Inc_Rev_GDP[-c(63:67), ]
+
+#Rename Year column
+Inc_Rev_GDP <- Inc_Rev_GDP %>% 
+  rename(
+    Year = 1)
+
+#Remove Spaces in Income Tax Column
+Inc_Rev_GDP <- Inc_Rev_GDP %>% 
+  rename(
+    Individual_income_taxes = 2)
+
+#Obtain Mean Tax Rate for each Year in Tax_Rate
+
+df <- Tax_Rate %>% 
+  group_by(Year) %>% #grouped by Year variable
+  summarise_each(funs(mean=mean(., na.rm=TRUE)))
+
+df2 <- Tax_Rate %>% 
+  group_by(Year) %>% #grouped by Year variable
+  summarise_each(funs(mean=mean(., na.rm=TRUE)))
+
+##Join GDP and Tax Rate
+
+df <- subset(df, select = -c(V10_mean))
+
+df <- left_join(Gov_Rev_GDP, df, by='Year')
+
+#drop NA
+
+df <- df %>% drop_na()
+
+#rename
+df <- df %>% 
+  rename(
+    Single_Rate = 'Single Filer (Rates/Brackets)_mean')
+
+##Join Inc_Rev_GDP and Tax Rate
+
+df2 <- subset(df2, select = -c(V10_mean))
+
+df2 <- left_join(Inc_Rev_GDP, df2, by='Year')
+
+#drop NA
+
+df2 <- df2 %>% drop_na()
+
+#rename
+df2 <- df2 %>% 
+  rename(
+    Single_Rate = 'Single Filer (Rates/Brackets)_mean')
+
+
+#==============================================================================
+#   3. Regressions and Estimates
+#==============================================================================
+
+###Line Graph for both variables
+#Plot relationship between GDP and Tax Rate
+
+ggplot(df, aes(Year, group = 1)) + 
+  geom_point(aes(y = Revenues, colour = "Revenue/GDP")) + 
+  geom_point(aes(y = Single_Rate, colour = "Tax Rate")) +
+  ggtitle('Relationship between GDP and Tax Rate') +
+  labs(xlab('Year'), ylab('% Change')) +
+  scale_x_discrete(breaks = c(1962, 1982, 2002, 2021))
+
+#Plot relationship between Income Tax Revenue and Tax Rate
+
+ggplot(df2, aes(Year, group = 1)) + 
+  geom_point(aes(y = Individual_income_taxes, colour = "Income Taxes")) + 
+  geom_point(aes(y = Single_Rate, colour = "Tax Rate")) +
+  ggtitle('Relationship between Income Tax Revenue and Tax Rate') +
+  labs(xlab('Year'), ylab('% Change')) +
+  scale_x_discrete(breaks = c(1962, 1982, 2002, 2021))
+
+
+#Linear model for Gov_Rev_GDP and Tax Rate
+lmmodel <- lm(Revenues ~ Single_Rate, data = df)
+
+summary(lmmodel)
+
+#Linear model for Inc_Rev_GDP and Tax Rate
+
+lmmodel2 <- lm(Individual_income_taxes ~ Single_Rate, data = df2)
+
+summary(lmmodel2)
+
+#Stargazer table
+
+stargazer(lmmodel, lmmodel2,  
+          se=list(cse(lmmodel),cse(lmmodel2)),
+          title="Tax Revenue and Tax Rate", type="text",
+          column.labels=c("Government Revenue", "Individual Income Tax Revenue"),
+          df=FALSE, digits=4)
+
+
+
+
